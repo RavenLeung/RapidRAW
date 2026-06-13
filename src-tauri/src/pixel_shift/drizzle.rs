@@ -1,200 +1,125 @@
 use rayon::prelude::*;
 
-/// Bayer Drizzle super-resolution merger.
+/// Bayer Drizzle super-resolution.
 ///
-/// Splits each CFA frame into 4 independent monochrome channels
-/// (R, G1, G2, B), drizzles each onto a 2× denser output grid using
-/// the known sub-pixel shift per frame, then combines into RGB.
+/// Splits CFA frames into 4 monochrome channels (R, G1, G2, B),
+/// drizzles each independently onto a 2× denser output grid using
+/// the measured sub-pixel shift per frame, then combines into RGB.
 ///
-/// Algorithm: Fruchter & Hook (2002) "Drizzle: A Method for the Linear
-/// Reconstruction of Undersampled Images", adapted for Bayer CFA data.
+/// Algorithm: Fruchter & Hook (2002), adapted for Bayer CFA data.
 
-/// Output of one channel drizzle pass
-struct ChannelDrizzle {
-    sum: Vec<f64>,     // weighted sum of values
-    weight: Vec<f64>,  // total weight per pixel
-    width: u32,
-    height: u32,
+struct DrizzleChan {
+    sum: Vec<f32>,
+    weight: Vec<f32>,
+    w: u32,
+    h: u32,
 }
 
-impl ChannelDrizzle {
-    fn new(width: u32, height: u32) -> Self {
-        let size = (width * height) as usize;
-        Self { sum: vec![0.0; size], weight: vec![0.0; size], width, height }
+impl DrizzleChan {
+    fn new(w: u32, h: u32) -> Self {
+        Self { sum: vec![0.0; (w*h) as usize], weight: vec![0.0; (w*h) as usize], w, h }
     }
 
-    #[inline]
-    fn add(&mut self, x: f32, y: f32, value: f32, pixscale: f32) {
-        // Input pixel center at (x, y) in output coordinates
-        // Input pixel extends ±0.5 input pixels ≈ ±0.5/pixscale output pixels
-        let half = 0.5 / pixscale;
-
-        let x0 = (x - half).floor() as i32;
-        let y0 = (y - half).floor() as i32;
-        let x1 = (x + half).ceil() as i32;
-        let y1 = (y + half).ceil() as i32;
-
-        for oy in y0..y1 {
-            if oy < 0 || oy >= self.height as i32 { continue; }
-            for ox in x0..x1 {
-                if ox < 0 || ox >= self.width as i32 { continue; }
-
-                // Area overlap between input pixel and output pixel
-                let ol = (ox as f32 + 0.5).min(x + half) - (ox as f32 - 0.5).max(x - half);
-                let ot = (oy as f32 + 0.5).min(y + half) - (oy as f32 - 0.5).max(y - half);
-                let overlap = (ol.max(0.0) * ot.max(0.0)).min(1.0);
-
-                if overlap > 0.0 {
-                    let idx = (oy as u32 * self.width + ox as u32) as usize;
-                    self.sum[idx] += value as f64 * overlap as f64;
-                    self.weight[idx] += overlap as f64;
-                }
-            }
+    #[inline(always)]
+    fn add(&mut self, ox: u32, oy: u32, val: f32) {
+        let i = (oy * self.w + ox) as usize;
+        unsafe {
+            *self.sum.get_unchecked_mut(i) += val;
+            *self.weight.get_unchecked_mut(i) += 1.0;
         }
     }
 
-    fn normalize(&self) -> Vec<f32> {
-        self.sum.par_iter().zip(self.weight.par_iter())
-            .map(|(&s, &w)| if w > 0.0 { (s / w) as f32 } else { 0.0f32 })
-            .collect()
+    fn normalize(self) -> Vec<f32> {
+        self.sum.into_par_iter().zip(self.weight.into_par_iter())
+            .map(|(s, w)| if w > 0.0 { s / w } else { 0.0 }).collect()
     }
 }
 
-/// Run Bayer Drizzle on a set of CFA frames with known sub-pixel shifts.
-///
-/// # Arguments
-/// * `cfa_data` — Raw u16 pixel data from each frame
-/// * `width`, `height` — Native sensor dimensions
-/// * `cfa` — CFA pattern string (e.g. "RGGB")
-/// * `shifts` — Per-frame (dx, dy) offset in sensor pixels, relative to reference
-/// * `black_levels` — Per-frame per-channel black levels [R, G1, B, G2]
-/// * `white_levels` — Per-frame white levels
-/// * `scale` — Output scale factor (2 = 2× super-resolution)
-///
-/// # Returns
-/// An RGB f32 image at `width*scale × height*scale`
+/// Drizzle one Bayer channel onto the output grid.
+#[allow(clippy::too_many_arguments)]
+fn drizzle_one_channel(
+    target: u8, width: u32, height: u32, cfa: &str,
+    cfa_data: &[&[u16]], shifts: &[(f32, f32)],
+    black_levels: &[[f32; 4]], white_levels: &[f32], scale: u32,
+    ow: u32, oh: u32,
+) -> Vec<f32> {
+    let nf = cfa_data.len();
+    let tile_h = 128u32;
+    let tile_starts: Vec<u32> = (0..height).step_by(tile_h as usize).collect();
+
+    let all_tiles: Vec<Vec<(u32, u32, f32)>> = tile_starts.par_iter().map(|&sy_start| {
+        let sy_end = (sy_start + tile_h).min(height);
+        let mut samples = Vec::with_capacity(500_000);
+        for fi in 0..nf {
+            let (dx, dy) = shifts[fi];
+            let data = cfa_data[fi];
+            let bl = black_levels[fi];
+            let wl = white_levels[fi].max(1.0);
+            let ch_bl = match target { 0 => bl[0], 1 => bl[1], 2 => bl[2], 3 => bl[3], _ => 0.0 };
+            let ch_range = (wl - ch_bl).max(1.0);
+            for sy in sy_start..sy_end {
+                for sx in 0..width {
+                    if !bayer_is(cfa, sx, sy, target) { continue; }
+                    let raw = cfa_data[fi][(sy * width + sx) as usize] as f32;
+                    let val = ((raw - ch_bl) / ch_range).clamp(0.0, 1.0);
+                    if val <= 0.0 { continue; }
+                    let ox = (sx as f32 + 0.5 + dx) * scale as f32;
+                    let oy = (sy as f32 + 0.5 + dy) * scale as f32;
+                    let oix = ox.round() as i32;
+                    let oiy = oy.round() as i32;
+                    if oix >= 0 && oiy >= 0 && (oix as u32) < ow && (oiy as u32) < oh {
+                        samples.push((oix as u32, oiy as u32, val));
+                    }
+                }
+            }
+        }
+        samples
+    }).collect();
+
+    let mut chan = DrizzleChan::new(ow, oh);
+    for tile in &all_tiles {
+        for &(ox, oy, val) in tile {
+            chan.add(ox, oy, val);
+        }
+    }
+    chan.normalize()
+}
+
 pub fn bayer_drizzle(
-    cfa_data: &[&[u16]],
-    width: u32,
-    height: u32,
-    cfa: &str,
+    cfa_data: &[&[u16]], width: u32, height: u32, cfa: &str,
     shifts: &[(f32, f32)],
-    black_levels: &[[f32; 4]],
-    white_levels: &[f32],
-    scale: u32,
+    black_levels: &[[f32; 4]], white_levels: &[f32], scale: u32,
 ) -> image::DynamicImage {
-    let num_frames = cfa_data.len();
-    let out_w = width * scale;
-    let out_h = height * scale;
+    let nf = cfa_data.len();
+    let ow = width * scale;
+    let oh = height * scale;
 
-    // 4 independent channel drizzles: R, G1, G2, B
-    let mut r_chan = ChannelDrizzle::new(out_w, out_h);
-    let mut g1_chan = ChannelDrizzle::new(out_w, out_h);
-    let mut g2_chan = ChannelDrizzle::new(out_w, out_h);
-    let mut b_chan = ChannelDrizzle::new(out_w, out_h);
+    // Process 4 channels: R(0) at (0,0), G1(1) at (1,0), B(2) at (1,1), G2(3) at (0,1)
+    let r_out = drizzle_one_channel(0, width, height, cfa, cfa_data, shifts, black_levels, white_levels, scale, ow, oh);
+    let g1_out = drizzle_one_channel(1, width, height, cfa, cfa_data, shifts, black_levels, white_levels, scale, ow, oh);
+    let g2_out = drizzle_one_channel(3, width, height, cfa, cfa_data, shifts, black_levels, white_levels, scale, ow, oh);
+    let b_out = drizzle_one_channel(2, width, height, cfa, cfa_data, shifts, black_levels, white_levels, scale, ow, oh);
 
-    for fi in 0..num_frames {
-        let (dx, dy) = shifts[fi];
-        let data = cfa_data[fi];
-        let bl = black_levels[fi];
-        let wl = white_levels[fi].max(1.0);
-        let range_r = (wl - bl[0]).max(1.0);
-        let range_g1 = (wl - bl[1]).max(1.0);
-        let range_b = (wl - bl[2]).max(1.0);
-        let range_g2 = (wl - bl[3]).max(1.0);
-
-        // Drizzle each Bayer pixel from this frame onto the output grid
-        for sy in 0..height {
-            for sx in 0..width {
-                let idx = (sy * width + sx) as usize;
-                let raw = data[idx] as f32;
-
-                // Determine Bayer color and per-channel params
-                let (value, channel, channel_offset_x, channel_offset_y) = bayer_info(
-                    cfa, sx, sy, raw, &bl, wl, range_r, range_g1, range_b, range_g2,
-                );
-
-                if value <= 0.0 { continue; }
-
-                // Map this input pixel's sensor position to output grid coordinates
-                // Input pixel center in sensor coords: (sx + 0.5 + dx, sy + 0.5 + dy)
-                // Output grid: each output pixel = 1/scale sensor pixels
-                let out_x = (sx as f32 + 0.5 + dx + channel_offset_x) * scale as f32;
-                let out_y = (sy as f32 + 0.5 + dy + channel_offset_y) * scale as f32;
-                let pixscale = scale as f32; // input pixel size in output pixels
-
-                match channel {
-                    0 => r_chan.add(out_x, out_y, value, pixscale),
-                    1 => g1_chan.add(out_x, out_y, value, pixscale),
-                    2 => b_chan.add(out_x, out_y, value, pixscale),
-                    3 => g2_chan.add(out_x, out_y, value, pixscale),
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    // Normalize each channel
-    let r_out = r_chan.normalize();
-    let g1_out = g1_chan.normalize();
-    let g2_out = g2_chan.normalize();
-    let b_out = b_chan.normalize();
-
-    // Combine into RGB: G = average of G1 + G2
-    let pixel_count = (out_w * out_h) as usize;
-    let mut output: image::ImageBuffer<image::Rgba<f32>, Vec<f32>> =
-        image::ImageBuffer::new(out_w, out_h);
-
-    output.pixels_mut().enumerate().for_each(|(i, p)| {
-        let r = r_out[i];
-        let g = (g1_out[i] + g2_out[i]) * 0.5;
-        let b = b_out[i];
-        p[0] = r.clamp(0.0, 1.0);
-        p[1] = g.clamp(0.0, 1.0);
-        p[2] = b.clamp(0.0, 1.0);
+    // Combine
+    let mut out = image::ImageBuffer::<image::Rgba<f32>, Vec<f32>>::new(ow, oh);
+    out.pixels_mut().enumerate().for_each(|(i, p)| {
+        p[0] = r_out[i].clamp(0.0, 1.0);
+        p[1] = ((g1_out[i] + g2_out[i]) * 0.5).clamp(0.0, 1.0);
+        p[2] = b_out[i].clamp(0.0, 1.0);
         p[3] = 1.0;
     });
-
-    image::DynamicImage::ImageRgba32F(output)
+    image::DynamicImage::ImageRgba32F(out)
 }
 
-/// Extra Bayer channel relative to the R pixel at (0,0).
-/// Channel offsets for positioning on the output grid:
-///   R at (0,0), G1 at (1,0), B at (1,1), G2 at (0,1)
 #[inline]
-fn bayer_info(
-    cfa: &str,
-    sx: u32, sy: u32,
-    raw: f32,
-    bl: &[f32; 4],
-    wl: f32,
-    range_r: f32, range_g1: f32, range_b: f32, range_g2: f32,
-) -> (f32, u8, f32, f32) {
-    let pos = ((sy & 1) << 1) | (sx & 1);
-
+fn bayer_is(cfa: &str, x: u32, y: u32, target: u8) -> bool {
+    let pos = ((y & 1) << 1) | (x & 1);
     match cfa {
-        "RGGB" => match pos {
-            0 => { // R
-                let v = ((raw - bl[0]) / range_r).clamp(0.0, 1.0);
-                (v, 0, 0.0, 0.0)
-            }
-            1 => { // G1 (top-right in 2×2)
-                let v = ((raw - bl[1]) / range_g1).clamp(0.0, 1.0);
-                (v, 1, 0.0, 0.0)
-            }
-            2 => { // G2 (bottom-left in 2×2)
-                let v = ((raw - bl[3]) / range_g2).clamp(0.0, 1.0);
-                (v, 3, 0.0, 0.0)
-            }
-            3 => { // B
-                let v = ((raw - bl[2]) / range_b).clamp(0.0, 1.0);
-                (v, 2, 0.0, 0.0)
-            }
-            _ => (0.0, 0, 0.0, 0.0),
+        "RGGB" => match (pos, target) {
+            (0, 0) | (1, 1) | (2, 3) | (3, 2) => true,
+            _ => false,
         },
-        _ => { // Default: assume RGGB
-            bayer_info("RGGB", sx, sy, raw, bl, wl, range_r, range_g1, range_b, range_g2)
-        }
+        _ => bayer_is("RGGB", x, y, target),
     }
 }
 
@@ -203,32 +128,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_bayer_drizzle_basic() {
-        // Create 4 synthetic frames with known shifts
-        let w = 64u32;
-        let h = 64u32;
-        let size = (w * h) as usize;
-
-        // Reference: checkerboard pattern
-        let mut ref_data = vec![0u16; size];
-        for y in 0..h {
-            for x in 0..w {
-                let idx = (y * w + x) as usize;
-                ref_data[idx] = if (x + y) % 2 == 0 { 10000 } else { 20000 };
-            }
-        }
-
-        let frames: Vec<&[u16]> = (0..4).map(|_| ref_data.as_slice()).collect();
-        let bl = [0.0f32; 4];
-        let wl = [65535.0f32; 4];
+    fn test_drizzle() {
+        let w = 64; let h = 64;
+        let data: Vec<u16> = (0..w*h).map(|i| if i%2==0 {10000} else {20000}).collect();
+        let frames: Vec<&[u16]> = (0..4).map(|_| data.as_slice()).collect();
+        let bl = [0.0f32; 4]; let wl = [65535.0f32; 4];
         let shifts = vec![(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)];
-
-        let result = bayer_drizzle(
-            &frames, w, h, "RGGB", &shifts,
-            &[bl, bl, bl, bl], &[65535.0; 4], 2,
-        );
-
-        assert_eq!(result.width(), 128);
-        assert_eq!(result.height(), 128);
+        let r = bayer_drizzle(&frames, w, h, "RGGB", &shifts, &[bl;4], &[65535.0;4], 2);
+        assert_eq!(r.width(), 128);
+        assert_eq!(r.height(), 128);
     }
 }
