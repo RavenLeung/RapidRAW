@@ -160,16 +160,18 @@ fn sample_frame(frame_idx: u32, x: f32, y: f32, w: u32, h: u32) -> vec3<f32> {
     let fx = x - f32(x0);
     let fy = y - f32(y0);
 
-    let clamp_x = |cx: i32| -> u32 { return u32(clamp(cx, 0, i32(w) - 1)); };
-    let clamp_y = |cy: i32| -> u32 { return u32(clamp(cy, 0, i32(h) - 1)); };
-
     let stride = w;
     let base = frame_idx * (w * h);
 
-    let idx00 = base + clamp_y(y0) * stride + clamp_x(x0);
-    let idx10 = base + clamp_y(y0) * stride + clamp_x(x0 + 1);
-    let idx01 = base + clamp_y(y0 + 1) * stride + clamp_x(x0);
-    let idx11 = base + clamp_y(y0 + 1) * stride + clamp_x(x0 + 1);
+    let cx0 = clamp(x0, 0, i32(w) - 1);
+    let cy0 = clamp(y0, 0, i32(h) - 1);
+    let cx1 = clamp(x0 + 1, 0, i32(w) - 1);
+    let cy1 = clamp(y0 + 1, 0, i32(h) - 1);
+
+    let idx00 = base + u32(cy0) * stride + u32(cx0);
+    let idx10 = base + u32(cy0) * stride + u32(cx1);
+    let idx01 = base + u32(cy1) * stride + u32(cx0);
+    let idx11 = base + u32(cy1) * stride + u32(cx1);
 
     let p00 = all_frames[idx00];
     let p10 = all_frames[idx10];

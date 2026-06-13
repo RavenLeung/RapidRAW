@@ -1,6 +1,7 @@
 pub mod alignment;
 pub mod basic_merge;
 pub mod cfa_fusion;
+pub mod drizzle;
 pub mod frame_extraction;
 pub mod gpu_fusion;
 pub mod metadata;
@@ -74,6 +75,7 @@ pub async fn merge_pixel_shift(
     }
 
     let is_cfa_mode = method.to_lowercase().as_str() == "cfa";
+    let is_drizzle_mode = method.to_lowercase().as_str() == "drizzle";
 
     let merge_method = match method.to_lowercase().as_str() {
         "average" => MergeMethod::Average,
@@ -97,7 +99,7 @@ pub async fn merge_pixel_shift(
     // For RGB modes, load via standard RAW development pipeline
     let settings = crate::app_settings::load_settings(app_handle.clone()).unwrap_or_default();
 
-    let merged = if is_cfa_mode {
+    let merged = if is_cfa_mode || is_drizzle_mode {
         let cfa_frames: Vec<cfa_fusion::CfaFrame> = paths
             .iter()
             .map(|path| {
@@ -158,31 +160,56 @@ pub async fn merge_pixel_shift(
 
         let shift_tuples: Vec<(f32, f32)> = shifts.iter().map(|s| (s.dx, s.dy)).collect();
 
-        // Build noise model from aligned frame pairs
-        let _ = app_handle.emit("pixel-shift-progress", "Building noise model...");
-        let mut noise_model = noise_model::NoiseModel::new();
-        let cfa_data: Vec<Vec<u16>> = cfa_frames.iter().map(|cf| cf.data.clone()).collect();
-        let cfa_name = cfa_frames[0].cfa.name.clone();
-        noise_model.build(
-            &cfa_data,
-            cfa_frames[0].width,
-            cfa_frames[0].height,
-            &shift_tuples,
-            true,
-            Some(&cfa_name),
-        );
-        noise_model.normalize(1.0);
+        if is_drizzle_mode {
+            // Bayer Drizzle: split into 4 channels, drizzle each independently
+            let _ = app_handle.emit(
+                "pixel-shift-progress",
+                "Running Bayer Drizzle super-resolution...",
+            );
 
-        let _ = app_handle.emit(
-            "pixel-shift-progress",
-            format!(
-                "Fusing {} Bayer frames with confidence-weighted fusion...",
-                cfa_frames.len(),
-            ),
-        );
+            let cfa_slices: Vec<&[u16]> = cfa_frames.iter().map(|cf| cf.data.as_slice()).collect();
+            let bls: Vec<[f32; 4]> = cfa_frames.iter().map(|cf| cf.black_levels).collect();
+            let wls: Vec<f32> = cfa_frames.iter().map(|cf| cf.white_level).collect();
+            let cfa_name = cfa_frames[0].cfa.name.clone();
 
-        cfa_fusion::fuse_cfa_frames_with_shifts(&cfa_frames, &shift_tuples, Some(&noise_model))
-            .map_err(|e| format!("CFA fusion failed: {}", e))?
+            let scale = if shift_tuples.len() >= 16 { 2u32 } else { 1u32 };
+            drizzle::bayer_drizzle(
+                &cfa_slices,
+                cfa_frames[0].width,
+                cfa_frames[0].height,
+                &cfa_name,
+                &shift_tuples,
+                &bls,
+                &wls,
+                scale,
+            )
+        } else {
+            // Confidence-weighted CFA fusion
+            let _ = app_handle.emit("pixel-shift-progress", "Building noise model...");
+            let mut noise_model = noise_model::NoiseModel::new();
+            let cfa_data: Vec<Vec<u16>> = cfa_frames.iter().map(|cf| cf.data.clone()).collect();
+            let cfa_name = cfa_frames[0].cfa.name.clone();
+            noise_model.build(
+                &cfa_data,
+                cfa_frames[0].width,
+                cfa_frames[0].height,
+                &shift_tuples,
+                true,
+                Some(&cfa_name),
+            );
+            noise_model.normalize(1.0);
+
+            let _ = app_handle.emit(
+                "pixel-shift-progress",
+                format!(
+                    "Fusing {} Bayer frames with confidence-weighted fusion...",
+                    cfa_frames.len(),
+                ),
+            );
+
+            cfa_fusion::fuse_cfa_frames_with_shifts(&cfa_frames, &shift_tuples, Some(&noise_model))
+                .map_err(|e| format!("CFA fusion failed: {}", e))?
+        }
     } else {
         let loaded_frames: Vec<(String, DynamicImage)> = paths
         .iter()

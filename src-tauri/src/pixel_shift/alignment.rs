@@ -285,13 +285,17 @@ fn compute_gradients(
 
 /// Bilinear interpolation of a grayscale image at sub-pixel coordinates
 fn sample_bilinear(img: &GrayImage, width: u32, height: u32, x: f32, y: f32) -> f32 {
-    let x0 = x.floor() as u32;
-    let y0 = y.floor() as u32;
+    // Clamp to valid range [0, width-1] x [0, height-1]
+    let cx = x.clamp(0.0, width as f32 - 1.0);
+    let cy = y.clamp(0.0, height as f32 - 1.0);
+
+    let x0 = cx.floor() as u32;
+    let y0 = cy.floor() as u32;
     let x1 = (x0 + 1).min(width - 1);
     let y1 = (y0 + 1).min(height - 1);
 
-    let fx = x - x0 as f32;
-    let fy = y - y0 as f32;
+    let fx = cx - x0 as f32;
+    let fy = cy - y0 as f32;
 
     let p00 = img.get_pixel(x0, y0)[0] as f32;
     let p10 = img.get_pixel(x1, y0)[0] as f32;
@@ -334,16 +338,20 @@ fn sample_rgba_bilinear(
     x: f32,
     y: f32,
 ) -> image::Rgba<f32> {
-    let x0 = x.floor() as i32;
-    let y0 = y.floor() as i32;
+    // Clamp to valid range
+    let cx = x.clamp(0.0, width as f32 - 1.0);
+    let cy = y.clamp(0.0, height as f32 - 1.0);
+
+    let x0 = cx.floor() as i32;
+    let y0 = cy.floor() as i32;
     let x1 = x0 + 1;
     let y1 = y0 + 1;
 
-    let fx = x - x0 as f32;
-    let fy = y - y0 as f32;
+    let fx = cx - x0 as f32;
+    let fy = cy - y0 as f32;
 
-    let clamp_x = |cx: i32| -> u32 { cx.max(0).min(width as i32 - 1) as u32 };
-    let clamp_y = |cy: i32| -> u32 { cy.max(0).min(height as i32 - 1) as u32 };
+    let clamp_x = |ix: i32| -> u32 { ix.max(0).min(width as i32 - 1) as u32 };
+    let clamp_y = |iy: i32| -> u32 { iy.max(0).min(height as i32 - 1) as u32 };
 
     let p00 = img.get_pixel(clamp_x(x0), clamp_y(y0));
     let p10 = img.get_pixel(clamp_x(x1), clamp_y(y0));
