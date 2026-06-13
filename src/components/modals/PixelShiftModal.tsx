@@ -110,7 +110,7 @@ export default function PixelShiftModal({
             <XCircle className="w-12 h-12 text-red-500" />
           </div>
           <Text variant={TextVariants.title} className="mb-2 text-center">
-            Pixel Shift Merge Failed
+            {t('modals.pixelShift.failed')}
           </Text>
           <Text className="text-center p-4 rounded-lg bg-bg-primary max-w-md mt-2 leading-relaxed">
             {String(error)}
@@ -142,7 +142,7 @@ export default function PixelShiftModal({
                 className="flex items-center justify-center gap-2 mt-4"
               >
                 <CheckCircle className="w-5 h-5" />
-                <span>Pixel-Shift Merge Saved!</span>
+                <span>{t('modals.pixelShift.savedSuccess')}</span>
               </Text>
             </motion.div>
           )}
@@ -161,10 +161,10 @@ export default function PixelShiftModal({
               className="flex flex-col items-center w-full"
             >
               <Text variant={TextVariants.title} className="mb-2 text-center">
-                Merging Pixel Shift Frames
+                {t('modals.pixelShift.merging')}
               </Text>
               <Text className="text-center font-mono h-6 flex justify-center items-center">
-                {progressMessage || 'Initializing...'}
+                {progressMessage || t('modals.pixelShift.initializing')}
               </Text>
 
               <div className="mt-8 w-64 relative">
@@ -185,7 +185,7 @@ export default function PixelShiftModal({
               </div>
 
               <Text variant={TextVariants.small} className="mt-6 text-center max-w-xs opacity-60">
-                Merging {frameCount} pixel-shift frames. This may take a moment...
+                {t('modals.pixelShift.processing', { count: frameCount })}
               </Text>
             </motion.div>
           </div>
@@ -200,29 +200,33 @@ export default function PixelShiftModal({
           <Layers className="w-12 h-12 text-accent" />
         </div>
         <Text variant={TextVariants.title} className="mb-2 text-center">
-          Merge Pixel Shift
+          {t('modals.pixelShift.title')}
         </Text>
         <Text className="text-center max-w-md leading-relaxed mb-4">
-          Combine {frameCount} Nikon pixel-shift frames into a single high-resolution image.
+          {t('modals.pixelShift.description', { count: frameCount })}
         </Text>
 
         {/* Advanced Options */}
         <div className="w-full max-w-sm space-y-3 mt-2">
           <div>
-            <label className="block text-sm text-text-secondary mb-1">Merge Method</label>
+            <label className="block text-sm text-text-secondary mb-1">
+              {t('modals.pixelShift.mergeMethod')}
+            </label>
             <select
               value={mergeMethod}
               onChange={(e) => onMethodChange(e.target.value)}
               className="w-full px-3 py-2 rounded-md bg-bg-primary border border-surface text-sm"
             >
-              <option value="average">Average (Fast)</option>
-              <option value="median">Median (Robust)</option>
-              <option value="skr">Steering Kernel (High Quality)</option>
+              <option value="average">{t('modals.pixelShift.methodAverage')}</option>
+              <option value="median">{t('modals.pixelShift.methodMedian')}</option>
+              <option value="skr">{t('modals.pixelShift.methodSkr')}</option>
             </select>
           </div>
 
           <div className="flex items-center justify-between">
-            <label className="text-sm text-text-secondary">Motion Compensation</label>
+            <label className="text-sm text-text-secondary">
+              {t('modals.pixelShift.motionCompensation')}
+            </label>
             <button
               onClick={() => onMotionCompensationChange(!motionCompensation)}
               className={`relative w-10 h-5 rounded-full transition-colors ${
@@ -245,7 +249,7 @@ export default function PixelShiftModal({
     if (error) {
       return (
         <Button onClick={handleClose} className="w-full">
-          Close
+          {t('modals.pixelShift.close')}
         </Button>
       );
     }
@@ -257,9 +261,9 @@ export default function PixelShiftModal({
             onClick={handleClose}
             className="px-4 py-2 rounded-md text-text-secondary hover:bg-card-active transition-colors"
           >
-            Close
+            {t('modals.pixelShift.close')}
           </button>
-          <Button onClick={handleOpen}>Open in Editor</Button>
+          <Button onClick={handleOpen}>{t('modals.pixelShift.openInEditor')}</Button>
         </>
       );
     }
@@ -276,7 +280,7 @@ export default function PixelShiftModal({
           onClick={handleClose}
           className="px-4 py-2 rounded-md text-text-secondary hover:bg-card-active transition-colors text-sm"
         >
-          {finalImageBase64 ? 'Close' : 'Cancel'}
+          {finalImageBase64 ? t('modals.pixelShift.close') : t('modals.pixelShift.cancel')}
         </button>
 
         <Button
@@ -291,13 +295,13 @@ export default function PixelShiftModal({
           ) : (
             <Layers className="mr-2" size={16} />
           )}
-          {finalImageBase64 ? 'Retry' : 'Start Merge'}
+          {finalImageBase64 ? t('modals.pixelShift.retry') : t('modals.pixelShift.start')}
         </Button>
 
         {finalImageBase64 && (
           <Button onClick={handleSave} disabled={isSaving || isProcessing}>
             {isSaving ? <Loader2 className="animate-spin mr-2" size={16} /> : <Save className="mr-2" size={16} />}
-            Save
+            {t('modals.pixelShift.save')}
           </Button>
         )}
       </div>

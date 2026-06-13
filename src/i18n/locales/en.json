@@ -1263,6 +1263,29 @@
       "stitchingProgress": "Stitching Panorama",
       "title": "Stitch Panorama"
     },
+    "pixelShift": {
+      "cancel": "Cancel",
+      "close": "Close",
+      "description": "Combine {{count}} Nikon pixel-shift frames into a single high-resolution image.",
+      "description_one": "Combine {{count}} Nikon pixel-shift frame into a single high-resolution image.",
+      "description_other": "Combine {{count}} Nikon pixel-shift frames into a single high-resolution image.",
+      "failed": "Pixel Shift Merge Failed",
+      "initializing": "Initializing...",
+      "mergeMethod": "Merge Method",
+      "methodAverage": "Average (Fast)",
+      "methodMedian": "Median (Robust)",
+      "methodSkr": "Steering Kernel (High Quality)",
+      "merging": "Merging Pixel Shift Frames",
+      "motionCompensation": "Motion Compensation",
+      "openInEditor": "Open in Editor",
+      "processing": "Merging {{count}} pixel-shift frames. This may take a moment...",
+      "retry": "Retry",
+      "save": "Save",
+      "savedSuccess": "Pixel-Shift Merge Saved!",
+      "speedNotice": "Merging RAW frames is computationally intensive and may take a while depending on the method chosen.",
+      "start": "Start Merge",
+      "title": "Merge Pixel Shift"
+    },
     "renameAlbum": {
       "placeholder": "Enter new album name..."
     },

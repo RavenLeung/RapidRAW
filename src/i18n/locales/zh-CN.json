@@ -1263,6 +1263,29 @@
       "stitchingProgress": "拼接全景图中",
       "title": "拼接全景图"
     },
+    "pixelShift": {
+      "cancel": "取消",
+      "close": "关闭",
+      "description": "将 {{count}} 张尼康像素偏移照片合成为一张高分辨率图像。",
+      "description_one": "将 {{count}} 张尼康像素偏移照片合成为一张高分辨率图像。",
+      "description_other": "将 {{count}} 张尼康像素偏移照片合成为一张高分辨率图像。",
+      "failed": "像素偏移合并失败",
+      "initializing": "初始化中...",
+      "mergeMethod": "合并方法",
+      "methodAverage": "平均（快速）",
+      "methodMedian": "中值（稳健）",
+      "methodSkr": "转向核回归（高质量）",
+      "merging": "正在合并像素偏移帧",
+      "motionCompensation": "运动补偿",
+      "openInEditor": "在编辑器中打开",
+      "processing": "正在合并 {{count}} 帧像素偏移照片，请稍候...",
+      "retry": "重试",
+      "save": "保存",
+      "savedSuccess": "像素偏移合并已保存！",
+      "speedNotice": "合并 RAW 帧计算量较大，具体时间取决于所选的合并方法。",
+      "start": "开始合并",
+      "title": "合并像素偏移"
+    },
     "renameAlbum": {
       "placeholder": "输入新的相册名称..."
     },

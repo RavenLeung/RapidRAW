@@ -96,7 +96,7 @@ pub fn detect_motion(
     }
 
     let (width, height) = (frames[0].width(), frames[0].height());
-    let num_frames = frames.len();
+    let _num_frames = frames.len();
 
     // Extract luminance for all frames into a flat structure
     let frame_lums: Vec<Vec<f32>> = frames
@@ -264,15 +264,21 @@ mod tests {
 
     #[test]
     fn test_no_motion_identical_frames() {
-        let f1 = create_frame(64, 64, [0.5, 0.5, 0.5]);
-        let f2 = create_frame(64, 64, [0.5, 0.5, 0.5]);
-        let f3 = create_frame(64, 64, [0.5, 0.5, 0.5]);
+        use image::{ImageBuffer, Rgba};
+
+        // Create identical frames with some texture (not solid color)
+        let f1 = DynamicImage::ImageRgba32F(ImageBuffer::from_fn(64, 64, |x, y| {
+            let v = ((x + y) as f32 * 0.1).sin() * 0.2 + 0.5;
+            Rgba([v, v, v, 1.0])
+        }));
+        let f2 = f1.clone();
+        let f3 = f1.clone();
 
         let mask = detect_motion(&[f1, f2, f3], MotionDetectionParams::default());
 
-        // All pixels should be close to 1.0 (static)
+        // All pixels should be static (weight > 0.99)
         let avg_weight: f32 = mask.weights.iter().sum::<f32>() / mask.weights.len() as f32;
-        assert!(avg_weight > 0.99);
+        assert!(avg_weight > 0.99, "Expected avg_weight > 0.99, got {}", avg_weight);
     }
 
     #[test]

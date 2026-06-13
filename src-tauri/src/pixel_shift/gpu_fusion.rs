@@ -1,10 +1,10 @@
 use anyhow::Result;
-use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
+use image::{DynamicImage, ImageBuffer, Rgba};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use super::motion_detection::MotionMask;
-use super::skr_fusion::{SkrFusionParams, StructureTensor, eigen_decompose_2x2};
+use super::skr_fusion::{SkrFusionParams, StructureTensor};
 use crate::image_processing::GpuContext;
 
 /// GPU-accelerated pixel-shift fusion processor.
@@ -476,7 +476,7 @@ fn compute_tensor_at(
             let idx_u = ((sy - 1) * width as i32 + sx) as usize;
             let idx_d = ((sy + 1) * width as i32 + sx) as usize;
 
-            let l_c = rgb_luminance(ref_data[idx_c]);
+            let _l_c = rgb_luminance(ref_data[idx_c]);
             let l_l = rgb_luminance(ref_data[idx_l]);
             let l_r = rgb_luminance(ref_data[idx_r]);
             let l_u = rgb_luminance(ref_data[idx_u]);

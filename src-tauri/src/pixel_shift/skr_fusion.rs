@@ -203,7 +203,7 @@ impl SkrFusion {
                 let idx_up = ((sy - 1) * width as i32 + sx) as usize;
                 let idx_down = ((sy + 1) * width as i32 + sx) as usize;
 
-                let l_center = rgb_to_luminance(ref_data[idx_center]);
+                let _l_center = rgb_to_luminance(ref_data[idx_center]);
                 let l_left = rgb_to_luminance(ref_data[idx_left]);
                 let l_right = rgb_to_luminance(ref_data[idx_right]);
                 let l_up = rgb_to_luminance(ref_data[idx_up]);
@@ -379,7 +379,7 @@ pub fn eigen_decompose_2x2(tensor: &StructureTensor) -> EigenDecomp {
     // Eigenvalues of 2x2 symmetric matrix:
     // λ = (a + c ± sqrt((a - c)^2 + 4b^2)) / 2
     let trace = a + c;
-    let det = a * c - b * b;
+    let _det = a * c - b * b;
 
     // For numerical stability
     if trace.abs() < 1e-10 {
