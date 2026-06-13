@@ -5,6 +5,7 @@ pub mod frame_extraction;
 pub mod gpu_fusion;
 pub mod metadata;
 pub mod motion_detection;
+pub mod noise_model;
 pub mod skr_fusion;
 
 use anyhow::Result;
@@ -117,17 +118,82 @@ pub async fn merge_pixel_shift(
             })
             .collect::<Result<Vec<_>, String>>()?;
 
+        // Build luminance proxies for alignment from CFA data
+        let _ = app_handle.emit("pixel-shift-progress", "Measuring actual frame displacements...");
+        let luma_frames: Vec<DynamicImage> = cfa_frames
+            .iter()
+            .map(|cf| {
+                // Convert CFA to simple luminance image (average 2x2 Bayer → 1 pixel)
+                let lw = cf.width / 2;
+                let lh = cf.height / 2;
+                let mut luma: image::ImageBuffer<image::Luma<u8>, Vec<u8>> =
+                    image::ImageBuffer::new(lw, lh);
+                for y in 0..lh {
+                    for x in 0..lw {
+                        let base = (y * 2 * cf.width + x * 2) as usize;
+                        let v = if base + cf.width as usize + 1 < cf.data.len() {
+                            let a = cf.data[base] as u32;
+                            let b = cf.data[base + 1] as u32;
+                            let c = cf.data[base + cf.width as usize] as u32;
+                            let d = cf.data[base + cf.width as usize + 1] as u32;
+                            (((a + b + c + d) / 4) >> 8).min(255) as u8
+                        } else {
+                            128u8
+                        };
+                        luma.put_pixel(x, y, image::Luma([v]));
+                    }
+                }
+                DynamicImage::ImageLuma8(luma)
+            })
+            .collect();
+
+        let shifts = alignment::align_frames(&luma_frames, 0)
+            .map_err(|e| format!("Alignment failed: {}", e))?;
+
+        // Log measured vs ideal shifts
+        let ideal = cfa_fusion::nikon_shift_patterns(cfa_frames.len());
+        for (i, (s, ideal_s)) in shifts.iter().zip(ideal.iter()).enumerate() {
+            log::info!(
+                "Frame {}: measured=({:.3},{:.3}) ideal=({:.3},{:.3}) diff=({:.3},{:.3})",
+                i, s.dx, s.dy, ideal_s.0, ideal_s.1,
+                s.dx - ideal_s.0, s.dy - ideal_s.1
+            );
+        }
+
         let _ = app_handle.emit(
             "pixel-shift-progress",
             format!(
-                "Fusing {} Bayer frames ({}x{}) with sub-pixel shifts...",
-                cfa_frames.len(),
-                cfa_frames[0].width,
-                cfa_frames[0].height,
+                "Fusing {} Bayer frames ({}x{}) with measured shifts...",
+                cfa_frames.len(), cfa_frames[0].width, cfa_frames[0].height,
             ),
         );
 
-        cfa_fusion::fuse_cfa_frames(&cfa_frames)
+        let shift_tuples: Vec<(f32, f32)> = shifts.iter().map(|s| (s.dx, s.dy)).collect();
+
+        // Build noise model from aligned frame pairs
+        let _ = app_handle.emit("pixel-shift-progress", "Building noise model...");
+        let mut noise_model = noise_model::NoiseModel::new();
+        let cfa_data: Vec<Vec<u16>> = cfa_frames.iter().map(|cf| cf.data.clone()).collect();
+        let cfa_name = cfa_frames[0].cfa.name.clone();
+        noise_model.build(
+            &cfa_data,
+            cfa_frames[0].width,
+            cfa_frames[0].height,
+            &shift_tuples,
+            true,
+            Some(&cfa_name),
+        );
+        noise_model.normalize(1.0);
+
+        let _ = app_handle.emit(
+            "pixel-shift-progress",
+            format!(
+                "Fusing {} Bayer frames with confidence-weighted fusion...",
+                cfa_frames.len(),
+            ),
+        );
+
+        cfa_fusion::fuse_cfa_frames_with_shifts(&cfa_frames, &shift_tuples, Some(&noise_model))
             .map_err(|e| format!("CFA fusion failed: {}", e))?
     } else {
         let loaded_frames: Vec<(String, DynamicImage)> = paths

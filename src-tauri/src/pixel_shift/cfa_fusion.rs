@@ -67,6 +67,18 @@ pub fn extract_cfa_frame(file_bytes: &[u8]) -> Result<CfaFrame> {
 // 16-shot: 4×4 sub-pixel grid within 2×2 Bayer, step=0.5px → 2× super-resolution
 // 32-shot: 16-shot repeated for noise reduction
 
+/// Get Nikon ideal pixel-shift offsets for the given frame count.
+/// Returns a vector of (dx, dy) pairs for all frames.
+pub fn nikon_shift_patterns(frame_count: usize) -> Vec<(f32, f32)> {
+    let (unique, repeats) = get_shift_pattern(frame_count);
+    let mut all = Vec::with_capacity(frame_count);
+    for _ in 0..repeats {
+        all.extend(&unique);
+    }
+    all.truncate(frame_count);
+    all
+}
+
 /// Get Nikon pixel-shift sub-pixel offsets for the given frame count.
 /// Returns (unique_positions, repeat_count).
 fn get_shift_pattern(frame_count: usize) -> (Vec<(f32, f32)>, usize) {
@@ -112,15 +124,29 @@ fn get_shift_pattern(frame_count: usize) -> (Vec<(f32, f32)>, usize) {
 /// Output resolution:
 ///   - 4/8 shot: native resolution (fills Bayer gaps)
 ///   - 16/32 shot: 2× native resolution (sub-pixel reconstruction)
+use super::noise_model::NoiseModel;
+
+/// CFA fusion using ideal Nikon shift patterns.
 pub fn fuse_cfa_frames(frames: &[CfaFrame]) -> Result<DynamicImage> {
+    let all_shifts = nikon_shift_patterns(frames.len());
+    fuse_cfa_frames_with_shifts(frames, &all_shifts, None)
+}
+
+/// CFA fusion using externally measured sub-pixel shifts with optional noise model.
+///
+/// `shifts` should contain one (dx, dy) pair per frame, in sensor pixel units.
+/// `noise_model` enables PARSEK-style confidence-weighted fusion.
+pub fn fuse_cfa_frames_with_shifts(
+    frames: &[CfaFrame],
+    shifts: &[(f32, f32)],
+    noise_model: Option<&NoiseModel>,
+) -> Result<DynamicImage> {
     if frames.is_empty() {
         return Err(anyhow!("No frames provided"));
     }
 
     let (width, height) = (frames[0].width, frames[0].height);
     let num_frames = frames.len();
-    let (unique_shifts, repeats) = get_shift_pattern(num_frames);
-    let num_unique = unique_shifts.len();
 
     // Validate dimensions
     for (i, frame) in frames.iter().enumerate().skip(1) {
@@ -131,8 +157,9 @@ pub fn fuse_cfa_frames(frames: &[CfaFrame]) -> Result<DynamicImage> {
         }
     }
 
-    // Super-resolution scale
-    let scale = if num_unique >= 16 { 2u32 } else { 1u32 };
+    // Super-resolution scale: 2x for 16+ unique measured positions
+    // Check how many distinct shifts we have
+    let scale = estimate_scale_from_shifts(shifts);
     let out_w = width * scale;
     let out_h = height * scale;
 
@@ -159,14 +186,21 @@ pub fn fuse_cfa_frames(frames: &[CfaFrame]) -> Result<DynamicImage> {
             let sensor_x = ox / scale as f32;
             let sensor_y = oy / scale as f32;
 
-            // Collect R, G, B samples from all frames
-            let mut r_samples: Vec<f32> = Vec::with_capacity(num_frames);
-            let mut g_samples: Vec<f32> = Vec::with_capacity(num_frames * 2);
-            let mut b_samples: Vec<f32> = Vec::with_capacity(num_frames);
+            // Collect R, G, B samples from all frames with confidence weighting
+            let mut r_weighted_sum: f32 = 0.0;
+            let mut r_total_weight: f32 = 0.0;
+            let mut g_weighted_sum: f32 = 0.0;
+            let mut g_total_weight: f32 = 0.0;
+            let mut b_weighted_sum: f32 = 0.0;
+            let mut b_total_weight: f32 = 0.0;
+
+            // Reference frame sample values for noise model queries
+            let mut ref_r: Option<u16> = None;
+            let mut ref_g: Option<u16> = None;
+            let mut ref_b: Option<u16> = None;
 
             for fi in 0..num_frames {
-                let fi_unique = fi % num_unique;
-                let (sx_shift, sy_shift) = unique_shifts[fi_unique];
+                let (sx_shift, sy_shift) = shifts[fi];
                 let frame = &frames[fi];
                 let norm = &normalized[fi];
 
@@ -204,25 +238,61 @@ pub fn fuse_cfa_frames(frames: &[CfaFrame]) -> Result<DynamicImage> {
                             / (frame.white_level - bl[ch]).max(1.0))
                             .clamp(0.0, 1.0);
 
+                        // Confidence weight: spatial (from bilinear weights) × noise model
+                        let spatial_conf = w;
+                        let noise_conf = if let Some(nm) = noise_model {
+                            let raw_val = (corr * 65535.0) as u16;
+                            let ch = match color { 0 => 0, 1|3 => 1, 2 => 2, _ => 1 };
+                            // Use first frame's value as reference for noise model
+                            let ref_val = if fi == 0 {
+                                raw_val
+                            } else {
+                                match color {
+                                    0 => ref_r.unwrap_or(raw_val),
+                                    1|3 => ref_g.unwrap_or(raw_val),
+                                    2 => ref_b.unwrap_or(raw_val),
+                                    _ => raw_val,
+                                }
+                            };
+                            nm.confidence(ref_val, raw_val, ch)
+                        } else {
+                            1.0
+                        };
+
+                        let confidence = spatial_conf * noise_conf;
+                        if confidence < 0.001 { continue; }
+
                         match color {
-                            0 => r_samples.push(corr),
-                            1 | 3 => g_samples.push(corr),
-                            2 => b_samples.push(corr),
+                            0 => {
+                                r_weighted_sum += corr * confidence;
+                                r_total_weight += confidence;
+                                if fi == 0 { ref_r = Some((corr * 65535.0) as u16); }
+                            }
+                            1 | 3 => {
+                                g_weighted_sum += corr * confidence;
+                                g_total_weight += confidence;
+                                if fi == 0 { ref_g = Some((corr * 65535.0) as u16); }
+                            }
+                            2 => {
+                                b_weighted_sum += corr * confidence;
+                                b_total_weight += confidence;
+                                if fi == 0 { ref_b = Some((corr * 65535.0) as u16); }
+                            }
                             _ => {}
                         }
                     }
                 }
             }
 
-            // Median fusion: robust to outliers (motion, hot pixels)
-            let r = median(&r_samples);
-            let g = median(&g_samples);
-            let b = median(&b_samples);
+            // Confidence-weighted average
+            let r = if r_total_weight > 0.0 { r_weighted_sum / r_total_weight } else { 0.0 };
+            let g = if g_total_weight > 0.0 { g_weighted_sum / g_total_weight } else { 0.0 };
+            let b = if b_total_weight > 0.0 { b_weighted_sum / b_total_weight } else { 0.0 };
 
             // Fallback for missing channels
-            let r = if r_samples.is_empty() { g * 0.8 } else { r };
-            let b = if b_samples.is_empty() { g * 1.2 } else { b };
-            let g = if g_samples.is_empty() { (r + b) * 0.5 } else { g };
+            let r = if r_total_weight > 0.0 { r } else { g * 0.8 };
+            let b = if b_total_weight > 0.0 { b } else { g * 1.2 };
+            let g = if g_total_weight > 0.0 { g } else { (r + b) * 0.5 };
 
             [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)]
         })
@@ -237,6 +307,18 @@ pub fn fuse_cfa_frames(frames: &[CfaFrame]) -> Result<DynamicImage> {
     }
 
     Ok(DynamicImage::ImageRgba32F(output))
+}
+
+/// Estimate super-resolution scale from the spread of measured shifts.
+///
+/// Returns 2 if shifts cover at least 0.75 pixels in any direction
+/// (indicating sub-pixel coverage), 1 otherwise.
+fn estimate_scale_from_shifts(shifts: &[(f32, f32)]) -> u32 {
+    if shifts.is_empty() { return 1; }
+    let first = shifts[0];
+    let max_dx = shifts.iter().map(|s| (s.0 - first.0).abs()).fold(0.0f32, f32::max);
+    let max_dy = shifts.iter().map(|s| (s.1 - first.1).abs()).fold(0.0f32, f32::max);
+    if max_dx.max(max_dy) >= 0.75 { 2 } else { 1 }
 }
 
 fn median(vals: &[f32]) -> f32 {
