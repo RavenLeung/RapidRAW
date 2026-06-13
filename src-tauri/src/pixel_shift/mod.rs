@@ -118,36 +118,24 @@ pub async fn merge_pixel_shift(
             })
             .collect::<Result<Vec<_>, String>>()?;
 
-        // Build luminance proxies for alignment from CFA data
+        // Build properly demosaiced grayscale images for accurate alignment
+        // CFA raw data has Bayer color mosaic that confuses alignment.
+        // We need demosaiced luminance images where pixel brightness is consistent
+        // regardless of sensor position.
         let _ = app_handle.emit("pixel-shift-progress", "Measuring actual frame displacements...");
-        let luma_frames: Vec<DynamicImage> = cfa_frames
+        let align_images: Vec<DynamicImage> = paths
             .iter()
-            .map(|cf| {
-                // Convert CFA to simple luminance image (average 2x2 Bayer → 1 pixel)
-                let lw = cf.width / 2;
-                let lh = cf.height / 2;
-                let mut luma: image::ImageBuffer<image::Luma<u8>, Vec<u8>> =
-                    image::ImageBuffer::new(lw, lh);
-                for y in 0..lh {
-                    for x in 0..lw {
-                        let base = (y * 2 * cf.width + x * 2) as usize;
-                        let v = if base + cf.width as usize + 1 < cf.data.len() {
-                            let a = cf.data[base] as u32;
-                            let b = cf.data[base + 1] as u32;
-                            let c = cf.data[base + cf.width as usize] as u32;
-                            let d = cf.data[base + cf.width as usize + 1] as u32;
-                            (((a + b + c + d) / 4) >> 8).min(255) as u8
-                        } else {
-                            128u8
-                        };
-                        luma.put_pixel(x, y, image::Luma([v]));
-                    }
-                }
-                DynamicImage::ImageLuma8(luma)
+            .map(|path| {
+                let file_bytes = std::fs::read(path)
+                    .map_err(|e| format!("Failed to read {}: {}", path, e))?;
+                // Fast demosaic → grayscale for alignment
+                let img = load_base_image_from_bytes(&file_bytes, path, true, &settings, None)
+                    .map_err(|e| format!("Failed to load {}: {}", path, e))?;
+                Ok(img.to_luma8().into())
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
 
-        let shifts = alignment::align_frames(&luma_frames, 0)
+        let shifts = alignment::align_frames(&align_images, 0)
             .map_err(|e| format!("Alignment failed: {}", e))?;
 
         // Log measured vs ideal shifts
