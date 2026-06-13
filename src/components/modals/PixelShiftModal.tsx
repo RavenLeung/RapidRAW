@@ -217,6 +217,7 @@ export default function PixelShiftModal({
             >
               <option value="average">Average (Fast)</option>
               <option value="median">Median (Robust)</option>
+              <option value="skr">Steering Kernel (High Quality)</option>
             </select>
           </div>
 

@@ -1,10 +1,14 @@
+pub mod alignment;
 pub mod basic_merge;
 pub mod frame_extraction;
 pub mod metadata;
+pub mod motion_detection;
+pub mod skr_fusion;
 
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose};
 use image::{DynamicImage, ImageFormat};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::path::Path;
@@ -69,9 +73,10 @@ pub async fn merge_pixel_shift(
     let merge_method = match method.to_lowercase().as_str() {
         "average" => MergeMethod::Average,
         "median" => MergeMethod::Median,
+        "skr" => MergeMethod::SKR,
         _ => {
             return Err(format!(
-                "Unknown merge method: '{}'. Supported methods: average, median",
+                "Unknown merge method: '{}'. Supported methods: average, median, skr",
                 method
             ));
         }
@@ -143,14 +148,20 @@ pub async fn merge_pixel_shift(
         ),
     );
 
-    // Step 3: Merge frames
+    // Step 3: Merge frames (with optional advanced pipeline)
     let frames: Vec<DynamicImage> = loaded_frames
         .into_iter()
         .map(|(_, img)| img)
         .collect();
 
-    let merged = merge_frames(&frames, merge_method, motion_compensation)
-        .map_err(|e| format!("Failed to merge pixel-shift frames: {}", e))?;
+    let merged = if merge_method == MergeMethod::SKR {
+        // Advanced pipeline: alignment -> motion detection -> SKR fusion
+        merge_skr_pipeline(&frames, motion_compensation, &app_handle)
+            .map_err(|e| format!("Failed to merge pixel-shift frames with SKR: {}", e))?
+    } else {
+        merge_frames(&frames, merge_method, motion_compensation)
+            .map_err(|e| format!("Failed to merge pixel-shift frames: {}", e))?
+    };
 
     // Convert linear to sRGB for preview
     let merged_srgb = apply_linear_to_srgb(merged.clone());
@@ -223,6 +234,89 @@ pub async fn save_pixel_shift(
         .map_err(|e| format!("Failed to save merged image: {}", e))?;
 
     Ok(output_path.to_string_lossy().to_string())
+}
+
+/// Run the advanced SKR (Steering Kernel Regression) merge pipeline.
+///
+/// Steps:
+/// 1. Align frames with sub-pixel precision
+/// 2. Detect subject motion between frames
+/// 3. Fuse frames using structure-adaptive steering kernels
+fn merge_skr_pipeline(
+    frames: &[DynamicImage],
+    motion_compensation: bool,
+    app_handle: &tauri::AppHandle,
+) -> anyhow::Result<DynamicImage> {
+    use alignment::align_frames;
+    use motion_detection::{MotionDetectionParams, detect_motion};
+    use skr_fusion::{SkrFusion, SkrFusionParams};
+
+    let _ = app_handle.emit(
+        "pixel-shift-progress",
+        "Aligning frames with sub-pixel precision...",
+    );
+
+    // Step 1: Align frames
+    let shifts = align_frames(frames, 0)?;
+
+    // Log alignment results
+    for (i, shift) in shifts.iter().enumerate() {
+        if i == 0 {
+            continue;
+        }
+        log::info!(
+            "Frame {} alignment: dx={:.3}, dy={:.3}, quality={:.3}",
+            i,
+            shift.dx,
+            shift.dy,
+            shift.quality
+        );
+    }
+
+    // Step 2: Warp frames to align with reference
+    let aligned_frames: Vec<DynamicImage> = frames
+        .par_iter()
+        .enumerate()
+        .map(|(i, frame)| {
+            if i == 0 {
+                frame.clone()
+            } else {
+                alignment::warp_frame(frame, -shifts[i].dx, -shifts[i].dy)
+            }
+        })
+        .collect();
+
+    let motion_mask = if motion_compensation {
+        let _ = app_handle.emit(
+            "pixel-shift-progress",
+            "Detecting subject motion...",
+        );
+
+        let params = MotionDetectionParams::default();
+        Some(detect_motion(&aligned_frames, params))
+    } else {
+        None
+    };
+
+    let _ = app_handle.emit(
+        "pixel-shift-progress",
+        "Fusing frames with steering kernel regression...",
+    );
+
+    // Step 3: SKR fusion
+    let skr_params = SkrFusionParams {
+        kernel_sigma: 1.5,
+        stretch: 4.0,
+        structure_sigma: 1.0,
+        output_scale: 1.0,
+        robust_iterations: 1,
+        min_samples: 4,
+    };
+
+    let fusion = SkrFusion::new(skr_params);
+    let result = fusion.fuse(&aligned_frames, motion_mask.as_ref());
+
+    Ok(result)
 }
 
 /// Tauri command: detect pixel-shift burst groups from a set of file paths.

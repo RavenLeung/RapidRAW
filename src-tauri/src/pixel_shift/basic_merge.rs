@@ -9,6 +9,8 @@ pub enum MergeMethod {
     Average,
     /// Per-pixel median across all frames (handles outliers)
     Median,
+    /// Steering Kernel Regression — structure-adaptive anisotropic fusion
+    SKR,
 }
 
 /// Merge multiple aligned RAW frames into a single high-quality image.
@@ -40,6 +42,11 @@ pub fn merge_frames(
     match method {
         MergeMethod::Average => merge_average_cpu(frames, width, height),
         MergeMethod::Median => merge_median_cpu(frames, width, height),
+        MergeMethod::SKR => {
+            // SKR should be handled by merge_skr_pipeline in mod.rs.
+            // If called here, fall back to median as the closest approximation.
+            merge_median_cpu(frames, width, height)
+        }
     }
 }
 
