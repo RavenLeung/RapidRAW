@@ -331,6 +331,8 @@ function App() {
     handleSavePanorama,
     handleStartHdr,
     handleSaveHdr,
+    handleStartPixelShift,
+    handleSavePixelShift,
     handleApplyDenoise,
     handleBatchDenoise,
     handleSaveDenoisedImage,
@@ -719,6 +721,8 @@ function App() {
           handleStartPanorama={handleStartPanorama}
           handleSaveHdr={handleSaveHdr}
           handleStartHdr={handleStartHdr}
+          handleSavePixelShift={handleSavePixelShift}
+          handleStartPixelShift={handleStartPixelShift}
           refreshImageList={handleLibraryRefresh}
           handleApplyDenoise={handleApplyDenoise}
           handleBatchDenoise={handleBatchDenoise}

@@ -119,6 +119,7 @@ pub struct AppState {
     pub export_task_handle: Mutex<Option<JoinHandle<()>>>,
     pub hdr_result: Arc<Mutex<Option<DynamicImage>>>,
     pub panorama_result: Arc<Mutex<Option<DynamicImage>>>,
+    pub pixel_shift_result: Arc<Mutex<Option<crate::pixel_shift::PixelShiftMergeResult>>>,
     pub denoise_result: Arc<Mutex<Option<DynamicImage>>>,
     pub indexing_task_handle: Mutex<Option<JoinHandle<()>>>,
     pub lut_cache: Mutex<HashMap<String, Arc<Lut>>>,

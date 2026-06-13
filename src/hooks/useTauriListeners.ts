@@ -295,6 +295,45 @@ export function useTauriListeners({
           }));
         }
       }),
+      listen('pixel-shift-progress', (event: any) => {
+        if (isEffectActive) {
+          useUIStore.getState().setUI((state) => ({
+            pixelShiftModalState: {
+              ...state.pixelShiftModalState,
+              error: null,
+              finalImageBase64: null,
+              isOpen: true,
+              progressMessage: event.payload,
+            },
+          }));
+        }
+      }),
+      listen('pixel-shift-complete', (event: any) => {
+        if (isEffectActive) {
+          useUIStore.getState().setUI((state) => ({
+            pixelShiftModalState: {
+              ...state.pixelShiftModalState,
+              error: null,
+              finalImageBase64: event.payload.base64,
+              isProcessing: false,
+              progressMessage: 'Pixel Shift Merge Ready',
+            },
+          }));
+        }
+      }),
+      listen('pixel-shift-error', (event: any) => {
+        if (isEffectActive) {
+          useUIStore.getState().setUI((state) => ({
+            pixelShiftModalState: {
+              ...state.pixelShiftModalState,
+              error: String(event.payload),
+              finalImageBase64: null,
+              isProcessing: false,
+              progressMessage: 'An error occurred.',
+            },
+          }));
+        }
+      }),
       listen('culling-start', (event: any) => {
         if (isEffectActive) {
           useUIStore.getState().setUI((state) => ({

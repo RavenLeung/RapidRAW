@@ -10,6 +10,7 @@ import { useEditorStore } from '../../store/useEditorStore';
 import CopyPasteSettingsModal from './CopyPasteSettingsModal';
 import PanoramaModal from './PanoramaModal';
 import HdrModal from './HdrModal';
+import PixelShiftModal from './PixelShiftModal';
 import NegativeConversionModal from './NegativeConversionModal';
 import DenoiseModal from './DenoiseModal';
 import CreateFolderModal from './CreateFolderModal';
@@ -28,6 +29,8 @@ export interface AppModalsProps {
   handleStartPanorama: (paths: string[]) => void;
   handleSaveHdr: () => Promise<string>;
   handleStartHdr: (paths: string[]) => void;
+  handleSavePixelShift: () => Promise<string>;
+  handleStartPixelShift: (paths: string[], method: string, motionCompensation: boolean) => void;
   refreshImageList: () => Promise<void>;
   handleApplyDenoise: (intensity: number, method: 'ai' | 'bm3d') => Promise<void>;
   handleBatchDenoise: (intensity: number, method: 'ai' | 'bm3d', paths: string[]) => Promise<string[]>;
@@ -69,6 +72,7 @@ export default function AppModals(props: AppModalsProps) {
     confirmModalState,
     panoramaModalState,
     hdrModalState,
+    pixelShiftModalState,
     negativeModalState,
     denoiseModalState,
     cullingModalState,
@@ -91,6 +95,7 @@ export default function AppModals(props: AppModalsProps) {
       confirmModalState: state.confirmModalState,
       panoramaModalState: state.panoramaModalState,
       hdrModalState: state.hdrModalState,
+      pixelShiftModalState: state.pixelShiftModalState,
       negativeModalState: state.negativeModalState,
       denoiseModalState: state.denoiseModalState,
       cullingModalState: state.cullingModalState,
@@ -205,6 +210,46 @@ export default function AppModals(props: AppModalsProps) {
         onSave={props.handleSaveHdr}
         onMerge={() => props.handleStartHdr(hdrModalState.stitchingSourcePaths)}
         progressMessage={hdrModalState.progressMessage}
+      />
+      <PixelShiftModal
+        error={pixelShiftModalState.error}
+        finalImageBase64={pixelShiftModalState.finalImageBase64}
+        frameCount={pixelShiftModalState.frameCount}
+        isOpen={pixelShiftModalState.isOpen}
+        isProcessing={pixelShiftModalState.isProcessing}
+        mergeMethod={pixelShiftModalState.mergeMethod}
+        motionCompensation={pixelShiftModalState.motionCompensation}
+        onClose={() =>
+          setUI({
+            pixelShiftModalState: {
+              isOpen: false,
+              isProcessing: false,
+              progressMessage: '',
+              finalImageBase64: null,
+              error: null,
+              sourcePaths: [],
+              frameCount: 0,
+              mergeMethod: 'average',
+              motionCompensation: true,
+            },
+          })
+        }
+        onOpenFile={(path: string) => props.handleImageSelect(path)}
+        onSave={props.handleSavePixelShift}
+        onMerge={(method, motionComp) =>
+          props.handleStartPixelShift(pixelShiftModalState.sourcePaths, method, motionComp)
+        }
+        onMethodChange={(method) =>
+          setUI((state) => ({
+            pixelShiftModalState: { ...state.pixelShiftModalState, mergeMethod: method },
+          }))
+        }
+        onMotionCompensationChange={(enabled) =>
+          setUI((state) => ({
+            pixelShiftModalState: { ...state.pixelShiftModalState, motionCompensation: enabled },
+          }))
+        }
+        progressMessage={pixelShiftModalState.progressMessage}
       />
       <NegativeConversionModal
         isOpen={negativeModalState.isOpen}

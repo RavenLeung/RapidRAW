@@ -51,6 +51,18 @@ export interface HdrModalState {
   stitchingSourcePaths: Array<string>;
 }
 
+export interface PixelShiftModalState {
+  error: string | null;
+  finalImageBase64: string | null;
+  isOpen: boolean;
+  isProcessing: boolean;
+  progressMessage: string | null;
+  sourcePaths: Array<string>;
+  frameCount: number;
+  mergeMethod: string;
+  motionCompensation: boolean;
+}
+
 export interface DenoiseModalState {
   isOpen: boolean;
   isProcessing: boolean;
@@ -118,6 +130,7 @@ interface UIState {
   confirmModalState: ConfirmModalState;
   panoramaModalState: PanoramaModalState;
   hdrModalState: HdrModalState;
+  pixelShiftModalState: PixelShiftModalState;
   negativeModalState: NegativeConversionModalState;
   denoiseModalState: DenoiseModalState;
   cullingModalState: CullingModalState;
@@ -180,6 +193,17 @@ export const useUIStore = create<UIState>((set, get) => ({
     isProcessing: false,
     progressMessage: '',
     stitchingSourcePaths: [],
+  },
+  pixelShiftModalState: {
+    error: null,
+    finalImageBase64: null,
+    isOpen: false,
+    isProcessing: false,
+    progressMessage: '',
+    sourcePaths: [],
+    frameCount: 0,
+    mergeMethod: 'average',
+    motionCompensation: true,
   },
   negativeModalState: { isOpen: false, targetPaths: [] },
   denoiseModalState: {

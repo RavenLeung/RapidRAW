@@ -149,11 +149,79 @@ export function useProductivityActions(refreshImageList: () => Promise<void>) {
     [refreshImageList],
   );
 
+  const handleStartPixelShift = useCallback(
+    (paths: string[], mergeMethod: string, motionCompensation: boolean) => {
+      setUI((state) => ({
+        pixelShiftModalState: {
+          ...state.pixelShiftModalState,
+          isProcessing: true,
+          error: null,
+          finalImageBase64: null,
+          progressMessage: `Starting pixel-shift merge of ${paths.length} frames...`,
+          sourcePaths: paths,
+          mergeMethod,
+          motionCompensation,
+          frameCount: paths.length,
+        },
+      }));
+      invoke(Invokes.MergePixelShift, { paths, method: mergeMethod, motionCompensation }).catch((err) => {
+        setUI((state) => ({
+          pixelShiftModalState: {
+            ...state.pixelShiftModalState,
+            isProcessing: false,
+            error: String(err),
+          },
+        }));
+      });
+    },
+    [setUI],
+  );
+
+  const handleSavePixelShift = useCallback(async (): Promise<string> => {
+    const { pixelShiftModalState } = useUIStore.getState();
+    if (pixelShiftModalState.sourcePaths.length === 0) {
+      const err = 'Source paths for pixel-shift merge not found.';
+      setUI((state) => ({
+        pixelShiftModalState: { ...state.pixelShiftModalState, error: err },
+      }));
+      throw new Error(err);
+    }
+    try {
+      const savedPath: string = await invoke(Invokes.SavePixelShift, {
+        firstPathStr: pixelShiftModalState.sourcePaths[0],
+      });
+      await refreshImageList();
+      return savedPath;
+    } catch (err) {
+      console.error('Failed to save pixel-shift merge:', err);
+      setUI((state) => ({
+        pixelShiftModalState: { ...state.pixelShiftModalState, error: String(err) },
+      }));
+      throw err;
+    }
+  }, [refreshImageList, setUI]);
+
+  const handleDetectPixelShiftGroups = useCallback(
+    async (paths: string[]) => {
+      try {
+        const groups = await invoke(Invokes.DetectPixelShiftGroups, { paths });
+        return groups;
+      } catch (err) {
+        console.error('Failed to detect pixel-shift groups:', err);
+        return [];
+      }
+    },
+    [],
+  );
+
   return {
     handleStartPanorama,
     handleSavePanorama,
     handleStartHdr,
     handleSaveHdr,
+    handleStartPixelShift,
+    handleSavePixelShift,
+    handleDetectPixelShiftGroups,
     handleApplyDenoise,
     handleBatchDenoise,
     handleSaveDenoisedImage,

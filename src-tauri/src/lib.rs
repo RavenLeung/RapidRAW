@@ -28,6 +28,7 @@ mod mask_generation;
 mod negative_conversion;
 mod panorama_stitching;
 mod panorama_utils;
+mod pixel_shift;
 mod preset_converter;
 mod raw_processing;
 mod tagging;
@@ -2200,6 +2201,7 @@ pub fn run() {
             export_task_handle: Mutex::new(None),
             hdr_result: Arc::new(Mutex::new(None)),
             panorama_result: Arc::new(Mutex::new(None)),
+            pixel_shift_result: Arc::new(Mutex::new(None)),
             denoise_result: Arc::new(Mutex::new(None)),
             indexing_task_handle: Mutex::new(None),
             lut_cache: Mutex::new(HashMap::new()),
@@ -2259,6 +2261,9 @@ pub fn run() {
             image_loader::is_image_cached,
             panorama_stitching::stitch_panorama,
             panorama_stitching::save_panorama,
+            pixel_shift::merge_pixel_shift,
+            pixel_shift::save_pixel_shift,
+            pixel_shift::detect_pixel_shift_groups,
             export_processing::export_images,
             export_processing::cancel_export,
             export_processing::estimate_export_sizes,
