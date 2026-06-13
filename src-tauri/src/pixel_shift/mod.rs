@@ -81,10 +81,11 @@ pub async fn merge_pixel_shift(
         "average" => MergeMethod::Average,
         "median" => MergeMethod::Median,
         "skr" => MergeMethod::SKR,
-        "cfa" => MergeMethod::Median, // placeholder, not used directly
+        "cfa" => MergeMethod::Median,
+        "drizzle" => MergeMethod::Median,
         _ => {
             return Err(format!(
-                "Unknown merge method: '{}'. Supported methods: average, median, skr, cfa",
+                "Unknown merge method: '{}'. Supported methods: average, median, skr, cfa, drizzle",
                 method
             ));
         }
