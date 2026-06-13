@@ -217,6 +217,7 @@ export default function PixelShiftModal({
               onChange={(e) => onMethodChange(e.target.value)}
               className="w-full px-3 py-2 rounded-md bg-bg-primary border border-surface text-sm"
             >
+              <option value="cfa">Bayer CFA Fusion (Super-Res)</option>
               <option value="average">{t('modals.pixelShift.methodAverage')}</option>
               <option value="median">{t('modals.pixelShift.methodMedian')}</option>
               <option value="skr">{t('modals.pixelShift.methodSkr')}</option>

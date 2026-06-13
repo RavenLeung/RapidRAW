@@ -1,5 +1,6 @@
 pub mod alignment;
 pub mod basic_merge;
+pub mod cfa_fusion;
 pub mod frame_extraction;
 pub mod gpu_fusion;
 pub mod metadata;
@@ -71,13 +72,16 @@ pub async fn merge_pixel_shift(
         }
     }
 
+    let is_cfa_mode = method.to_lowercase().as_str() == "cfa";
+
     let merge_method = match method.to_lowercase().as_str() {
         "average" => MergeMethod::Average,
         "median" => MergeMethod::Median,
         "skr" => MergeMethod::SKR,
+        "cfa" => MergeMethod::Median, // placeholder, not used directly
         _ => {
             return Err(format!(
-                "Unknown merge method: '{}'. Supported methods: average, median, skr",
+                "Unknown merge method: '{}'. Supported methods: average, median, skr, cfa",
                 method
             ));
         }
@@ -88,10 +92,45 @@ pub async fn merge_pixel_shift(
         format!("Loading {} frames...", paths.len()),
     );
 
-    // Step 1: Load all frames via the standard RAW development pipeline
+    // Step 1: For CFA mode, extract raw Bayer data directly
+    // For RGB modes, load via standard RAW development pipeline
     let settings = crate::app_settings::load_settings(app_handle.clone()).unwrap_or_default();
 
-    let loaded_frames: Vec<(String, DynamicImage)> = paths
+    let merged = if is_cfa_mode {
+        let cfa_frames: Vec<cfa_fusion::CfaFrame> = paths
+            .iter()
+            .map(|path| {
+                let _ = app_handle.emit(
+                    "pixel-shift-progress",
+                    format!(
+                        "Extracting raw Bayer data from '{}'...",
+                        std::path::Path::new(path)
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                    ),
+                );
+                let file_bytes = std::fs::read(path)
+                    .map_err(|e| format!("Failed to read {}: {}", path, e))?;
+                cfa_fusion::extract_cfa_frame(&file_bytes)
+                    .map_err(|e| format!("Failed to extract CFA from {}: {}", path, e))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        let _ = app_handle.emit(
+            "pixel-shift-progress",
+            format!(
+                "Fusing {} Bayer frames ({}x{}) with sub-pixel shifts...",
+                cfa_frames.len(),
+                cfa_frames[0].width,
+                cfa_frames[0].height,
+            ),
+        );
+
+        cfa_fusion::fuse_cfa_frames(&cfa_frames)
+            .map_err(|e| format!("CFA fusion failed: {}", e))?
+    } else {
+        let loaded_frames: Vec<(String, DynamicImage)> = paths
         .iter()
         .map(|path| {
             let _ = app_handle.emit(
@@ -155,14 +194,15 @@ pub async fn merge_pixel_shift(
         .map(|(_, img)| img)
         .collect();
 
-    let merged = if merge_method == MergeMethod::SKR {
+    if merge_method == MergeMethod::SKR {
         // Advanced pipeline: alignment -> motion detection -> SKR fusion
         merge_skr_pipeline(&frames, motion_compensation, &app_handle, &state)
             .map_err(|e| format!("Failed to merge pixel-shift frames with SKR: {}", e))?
     } else {
         merge_frames(&frames, merge_method, motion_compensation)
             .map_err(|e| format!("Failed to merge pixel-shift frames: {}", e))?
-    };
+    }
+    }; // closes `let merged = if is_cfa_mode { ... } else { ... };`
 
     // Convert linear to sRGB for preview
     let merged_srgb = apply_linear_to_srgb(merged.clone());
@@ -315,35 +355,37 @@ fn merge_skr_pipeline(
         min_samples: 4,
     };
 
-    // Try GPU-accelerated fusion
-    let gpu_context = state.gpu_context.lock().unwrap();
+    // Try GPU-accelerated fusion (with poison guard)
+    let gpu_context = state.gpu_context.lock().unwrap_or_else(|e| {
+        log::warn!("GPU context mutex poisoned, falling back to CPU: {}", e);
+        e.into_inner()
+    });
     let result = if let Some(ref gpu_ctx) = *gpu_context {
         let _ = app_handle.emit(
             "pixel-shift-progress",
             "Running GPU-accelerated fusion...",
         );
 
-        match gpu_fusion::PixelShiftGpuProcessor::new(gpu_ctx) {
-            Ok(processor) => {
-                match processor.fuse(&aligned_frames, motion_mask.as_ref(), &skr_params) {
-                    Ok(result) => {
-                        log::info!("GPU pixel-shift fusion completed successfully");
-                        Some(result)
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "GPU fusion failed ({}), falling back to CPU",
-                            e
-                        );
-                        None
-                    }
-                }
+        // Catch panics from WGSL validation to fall back to CPU
+        let gpu_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            gpu_fusion::PixelShiftGpuProcessor::new(gpu_ctx)
+                .map_err(|e| anyhow::anyhow!("{}", e))
+                .and_then(|processor| {
+                    processor.fuse(&aligned_frames, motion_mask.as_ref(), &skr_params)
+                })
+        }));
+
+        match gpu_result {
+            Ok(Ok(result)) => {
+                log::info!("GPU pixel-shift fusion completed successfully");
+                Some(result)
             }
-            Err(e) => {
-                log::warn!(
-                    "Failed to create GPU processor ({}), falling back to CPU",
-                    e
-                );
+            Ok(Err(e)) => {
+                log::warn!("GPU fusion failed ({}), falling back to CPU", e);
+                None
+            }
+            Err(_panic) => {
+                log::warn!("GPU processor panicked, falling back to CPU");
                 None
             }
         }
