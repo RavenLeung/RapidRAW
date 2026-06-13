@@ -36,10 +36,10 @@ impl Default for SkrFusionParams {
 
 /// A 2x2 symmetric structure tensor for local gradient analysis.
 #[derive(Debug, Clone, Copy)]
-struct StructureTensor {
-    ixx: f32,
-    ixy: f32,
-    iyy: f32,
+pub struct StructureTensor {
+    pub ixx: f32,
+    pub ixy: f32,
+    pub iyy: f32,
 }
 
 /// Eigen-decomposition result for a 2x2 symmetric matrix.
@@ -371,7 +371,7 @@ impl SkrFusion {
 /// Matrix: [ixx, ixy; ixy, iyy]
 ///
 /// Returns eigenvalues (e1 >= e2) and angle of the dominant eigenvector.
-fn eigen_decompose_2x2(tensor: &StructureTensor) -> EigenDecomp {
+pub fn eigen_decompose_2x2(tensor: &StructureTensor) -> EigenDecomp {
     let a = tensor.ixx;
     let b = tensor.ixy;
     let c = tensor.iyy;

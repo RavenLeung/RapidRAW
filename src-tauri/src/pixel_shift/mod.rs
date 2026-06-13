@@ -1,6 +1,7 @@
 pub mod alignment;
 pub mod basic_merge;
 pub mod frame_extraction;
+pub mod gpu_fusion;
 pub mod metadata;
 pub mod motion_detection;
 pub mod skr_fusion;
@@ -156,7 +157,7 @@ pub async fn merge_pixel_shift(
 
     let merged = if merge_method == MergeMethod::SKR {
         // Advanced pipeline: alignment -> motion detection -> SKR fusion
-        merge_skr_pipeline(&frames, motion_compensation, &app_handle)
+        merge_skr_pipeline(&frames, motion_compensation, &app_handle, &state)
             .map_err(|e| format!("Failed to merge pixel-shift frames with SKR: {}", e))?
     } else {
         merge_frames(&frames, merge_method, motion_compensation)
@@ -246,6 +247,7 @@ fn merge_skr_pipeline(
     frames: &[DynamicImage],
     motion_compensation: bool,
     app_handle: &tauri::AppHandle,
+    state: &tauri::State<'_, AppState>,
 ) -> anyhow::Result<DynamicImage> {
     use alignment::align_frames;
     use motion_detection::{MotionDetectionParams, detect_motion};
@@ -303,7 +305,7 @@ fn merge_skr_pipeline(
         "Fusing frames with steering kernel regression...",
     );
 
-    // Step 3: SKR fusion
+    // Step 3: SKR fusion — try GPU first, fall back to CPU
     let skr_params = SkrFusionParams {
         kernel_sigma: 1.5,
         stretch: 4.0,
@@ -313,8 +315,54 @@ fn merge_skr_pipeline(
         min_samples: 4,
     };
 
-    let fusion = SkrFusion::new(skr_params);
-    let result = fusion.fuse(&aligned_frames, motion_mask.as_ref());
+    // Try GPU-accelerated fusion
+    let gpu_context = state.gpu_context.lock().unwrap();
+    let result = if let Some(ref gpu_ctx) = *gpu_context {
+        let _ = app_handle.emit(
+            "pixel-shift-progress",
+            "Running GPU-accelerated fusion...",
+        );
+
+        match gpu_fusion::PixelShiftGpuProcessor::new(gpu_ctx) {
+            Ok(processor) => {
+                match processor.fuse(&aligned_frames, motion_mask.as_ref(), &skr_params) {
+                    Ok(result) => {
+                        log::info!("GPU pixel-shift fusion completed successfully");
+                        Some(result)
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "GPU fusion failed ({}), falling back to CPU",
+                            e
+                        );
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to create GPU processor ({}), falling back to CPU",
+                    e
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    drop(gpu_context);
+
+    let result = match result {
+        Some(img) => img,
+        None => {
+            let _ = app_handle.emit(
+                "pixel-shift-progress",
+                "Running CPU fusion...",
+            );
+            let fusion = SkrFusion::new(skr_params);
+            fusion.fuse(&aligned_frames, motion_mask.as_ref())
+        }
+    };
 
     Ok(result)
 }
