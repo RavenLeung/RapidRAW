@@ -13,6 +13,7 @@ import {
   FolderInput,
   FolderPlus,
   Images,
+  Layers,
   LayoutTemplate,
   Redo,
   RefreshCw,
@@ -414,6 +415,7 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
       const conversionLabel = t('contextMenus.thumbnail.convertNegative', { count: selectionCount });
       const denoiseLabel = t('contextMenus.thumbnail.denoise', { count: selectionCount });
       const mergeLabel = t('contextMenus.editor.mergeHdr');
+      const pixelShiftLabel = t('contextMenus.editor.mergePixelShift');
 
       const handleCreateVirtualCopy = async (sourcePath: string) => {
         try {
@@ -600,6 +602,26 @@ export function useAppContextMenus(props: UseAppContextMenusProps) {
                     isProcessing: false,
                     progressMessage: null,
                     stitchingSourcePaths: finalSelection,
+                  },
+                });
+              },
+            },
+            {
+              disabled: selectionCount < 2 || selectionCount > 32,
+              icon: Layers,
+              label: pixelShiftLabel,
+              onClick: () => {
+                setUI({
+                  pixelShiftModalState: {
+                    error: null,
+                    finalImageBase64: null,
+                    isOpen: true,
+                    isProcessing: false,
+                    progressMessage: null,
+                    sourcePaths: finalSelection,
+                    frameCount: finalSelection.length,
+                    mergeMethod: 'average',
+                    motionCompensation: true,
                   },
                 });
               },

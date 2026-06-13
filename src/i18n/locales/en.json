@@ -181,6 +181,7 @@
       "exportImage": "Export Image",
       "frameImage": "Frame Image",
       "mergeHdr": "Merge to HDR",
+      "mergePixelShift": "Merge Pixel Shift",
       "noLabel": "No Label",
       "noRating": "No Rating",
       "pasteAdjustments": "Paste Adjustments",

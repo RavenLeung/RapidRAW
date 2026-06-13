@@ -181,6 +181,7 @@
       "exportImage": "导出图像",
       "frameImage": "装裱图像",
       "mergeHdr": "合并为 HDR",
+      "mergePixelShift": "合并像素偏移",
       "noLabel": "无标签",
       "noRating": "无评分",
       "pasteAdjustments": "粘贴调整",
