@@ -1758,5 +1758,10 @@
         "vectorscope": "矢量示波器"
       }
     }
+  },
+  "referenceView": {
+    "title": "附屏显示",
+    "open": "打开附屏",
+    "close": "关闭附屏"
   }
 }

@@ -1758,5 +1758,10 @@
         "vectorscope": "Vectorscope"
       }
     }
+  },
+  "referenceView": {
+    "title": "Reference Display",
+    "open": "Open Reference",
+    "close": "Close Reference"
   }
 }

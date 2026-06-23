@@ -1,5 +1,5 @@
 import { memo, useState, useEffect, useRef, useMemo } from 'react';
-import { Eye, EyeOff, ArrowLeft, Maximize, Loader2, Undo, Redo, Waves } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft, Maximize, Monitor, Loader2, Undo, Redo, Waves } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
@@ -13,10 +13,12 @@ interface EditorToolbarProps {
   canUndo: boolean;
   isAndroid: boolean;
   isLoading: boolean;
+  isReferenceOpen: boolean;
   onBackToLibrary(): void;
   onRedo(): void;
   onToggleFullScreen(): void;
   onToggleShowOriginal(): void;
+  onToggleReferenceDisplay(): void;
   onUndo(): void;
   selectedImage: SelectedImage;
   showOriginal: boolean;
@@ -33,10 +35,12 @@ const EditorToolbar = memo(
     canUndo,
     isAndroid,
     isLoading,
+    isReferenceOpen,
     onBackToLibrary,
     onRedo,
     onToggleFullScreen,
     onToggleShowOriginal,
+    onToggleReferenceDisplay,
     onUndo,
     selectedImage,
     showOriginal,
@@ -625,6 +629,19 @@ const EditorToolbar = memo(
             }
           >
             {showOriginal ? <EyeOff size={20} /> : <Eye size={20} />}
+          </button>
+          <button
+            className={clsx(
+              'p-2 rounded-full transition-colors',
+              isReferenceOpen
+                ? 'bg-accent text-button-text hover:bg-accent/90 hover:text-button-text'
+                : 'bg-surface hover:bg-card-active text-text-primary',
+            )}
+            onClick={onToggleReferenceDisplay}
+            onKeyDown={handleButtonKeyDown}
+            data-tooltip={t(isReferenceOpen ? 'referenceView.close' : 'referenceView.open')}
+          >
+            <Monitor size={20} />
           </button>
           <button
             className="bg-surface text-text-primary p-2 rounded-full hover:bg-card-active transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative"

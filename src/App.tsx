@@ -15,6 +15,7 @@ import AppModals from './components/modals/AppModals';
 
 import EditorView from './components/views/EditorView';
 import LibraryView from './components/views/LibraryView';
+import ReferenceViewer from './components/views/ReferenceViewer';
 
 import { ContextMenuProvider } from './context/ContextMenuContext';
 import { useSettingsStore } from './store/useSettingsStore';
@@ -81,6 +82,11 @@ const insertChildrenIntoTree = (node: any, targetPath: string, newChildren: any[
 };
 
 function App() {
+  // Reference display window: render minimal full-image viewer
+  if (window.location.search.includes('view=reference')) {
+    return <ReferenceViewer />;
+  }
+
   const COMPACT_EDITOR_MAX_WIDTH = 900;
 
   const { appSettings, theme, osPlatform, handleSettingsChange } = useSettingsStore(

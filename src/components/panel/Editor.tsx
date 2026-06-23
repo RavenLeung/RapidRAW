@@ -20,6 +20,7 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useAiMasking } from '../../hooks/useAiMasking';
+import { useReferenceDisplay } from '../../hooks/useReferenceDisplay';
 
 const parseRgb = (rgbStr: string): [number, number, number, number] => {
   const match = rgbStr.match(/[\d.]+/g);
@@ -133,6 +134,10 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
     [debouncedSetHistory, setEditor],
   );
   const { handleGenerateAiMask, handleQuickErase } = useAiMasking();
+  const {
+    isReferenceOpen,
+    toggleReferenceWindow,
+  } = useReferenceDisplay();
   const [crop, setCrop] = useState<Crop | null>(null);
   const prevCropParams = useRef<any>(null);
   const lastValidCropRef = useRef<PercentCrop | null>(null);
@@ -1949,10 +1954,12 @@ export default function Editor({ onBackToLibrary, onContextMenu, transformWrappe
           canUndo={canUndo}
           isAndroid={isAndroid}
           isLoading={isLoading}
+          isReferenceOpen={isReferenceOpen}
           onBackToLibrary={onBackToLibrary}
           onRedo={redo}
           onToggleFullScreen={handleToggleFullScreen}
           onToggleShowOriginal={toggleShowOriginal}
+          onToggleReferenceDisplay={toggleReferenceWindow}
           onUndo={undo}
           selectedImage={selectedImage}
           showOriginal={showOriginal}
